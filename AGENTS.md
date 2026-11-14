@@ -53,6 +53,13 @@ fetches the LVGL + ArduinoJson checkouts this CMakeLists points at into
 - **Commits**: focused, atomic. Subject ≤ 50 chars, imperative.
 - **Never auto-commit, never auto-push.** Only when the user asks.
 - **No release-flow work** unless the user says release.
+- **Releases**: release-please (`release-please.yml`) keeps a
+  `chore: release x.y.z` PR open on main; merging it tags the release
+  and attaches the committed bundle. PR titles are the release notes:
+  Conventional Commits, subject lower case, at most 50 characters.
+  PRs are merged with a merge commit, so release-please works out the
+  version from the branch commits: keep those conventional too.
+  Never bump `version.txt` or push a tag by hand.
 - **No AI attribution** anywhere.
 - The generated `public/jlp_wasm.{js,wasm}` are committed so the
   designer's `copy-wasm.sh` can pull them without an emscripten

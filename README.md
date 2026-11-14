@@ -133,6 +133,17 @@ in lockstep manually:
 
 Pixel-perfect parity depends on both.
 
+## Releases
+
+release-please keeps a `chore: release x.y.z` pull request open on main
+with `CHANGELOG.md` and the `version.txt` bump. It refreshes on a merged
+`feat`, `fix`, `perf`, `refactor` or `revert` pull request, a breaking
+change, a `Release-As:` footer, or a bundle the manual rebuild
+(`rebuild-wasm.yml`) committed to main. Merging it tags the release and
+attaches that commit's `public/jlp_wasm.js` and `public/jlp_wasm.wasm`
+to it. Pull request titles are the release notes, so they follow
+Conventional Commits (`pr-title.yml` checks them).
+
 ## License
 
 espos-p4-cockpit-wasm (sensesp-p4-cockpit-wasm before the espOS port)
