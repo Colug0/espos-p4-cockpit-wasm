@@ -1,0 +1,200 @@
+# Cuts releases from the history, the way the firmware repos do: a push to
+# main that carries a change users get (the gate below) refreshes a "chore:
+# release x.y.z" pull request carrying the changelog and the version.txt bump,
+# and merging that PR tags the release. feat bumps minor, fix bumps patch, a
+# `!` bumps major. The changelog is the release notes GitHub generates for the
+# merged pull requests, each with its author and a link to it, sorted by the
+# labels label-by-title.yml sets (.github/release.yml).
+#
+# What a release ships is the committed bundle, public/jlp_wasm.{js,wasm}, so
+# the tagged commit's bundle is attached to the release as it stands; nothing
+# is rebuilt here. The designer's copy-wasm.sh still reads main, and can pin a
+# release's assets instead whenever that is wanted.
+#
+# rebuild-wasm.yml commits a fresh bundle straight to main with the workflow
+# token, and GitHub starts no workflow for a push made with that token. A
+# successful manual rebuild on main therefore reaches this workflow through
+# workflow_run, and the gate counts the rebuild commit as releasable: a new
+# bundle is exactly what the designer's users get.
+name: release-please
+
+on:
+  push:
+    branches: [main]
+  workflow_run:
+    workflows: [Rebuild WASM preview bundle]
+    types: [completed]
+  # A change to the release configuration is a ci merge, which the gate stops,
+  # so a manual run is what rewrites the open release PR against it.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # GitHub's release notes are never empty -- they always end in a "Full
+  # Changelog" link -- so release-please, which skips a release only when its
+  # notes are empty, would propose one after every merge, a docs or ci change
+  # included. Only a push carrying a change users get goes on: feat, fix,
+  # perf, refactor or revert, a breaking change whatever its type, a
+  # `Release-As:` footer, a bundle rebuild-wasm.yml built from firmware main
+  # (a trial build against a branch or a fork is not a release), and the merge
+  # of the release PR itself, which is what creates the tag. This repository
+  # merges pull requests with a merge commit, whose third line is the PR title,
+  # so that line is judged as well as each commit's first. The payload holds
+  # at most 2048 commits, so a push that fills it may hide more and is let
+  # through.
+  gate:
+    # A rebuild that failed, ran on a pull request or targeted another branch
+    # committed nothing to main.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'workflow_dispatch' &&
+       github.event.workflow_run.head_branch == github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      releasable: ${{ steps.check.outputs.releasable }}
+    steps:
+      # A manual run carries no commits of its own, so it judges every commit
+      # since the last release instead. With no tag for the manifest's version
+      # (a merged release PR never tagged) it goes on. A rebuild is judged by
+      # the commit it made alone: an older unreleased feat must not carry a
+      # trial bundle into the release PR, and it refreshed the PR on its own
+      # push anyway.
+      # The default branch, never the ref a manual run was started from:
+      # release-please always works on main.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: github.event_name != 'push'
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+      - id: check
+        env:
+          EVENT: ${{ github.event_name }}
+          REBUILT_FROM: ${{ github.event.workflow_run.head_sha }}
+          MESSAGES: ${{ toJSON(github.event.commits.*.message) }}
+          RELEASABLE: '^((feat|fix|perf|refactor|revert)(\([^)]*\))?!?: |[a-z]+(\([^)]*\))?!: |Revert |chore: release v?[0-9]|build: rebuild WASM bundle against (dirkwa|signalk-espOS)/espos-p4-cockpit@main$)'
+        run: |
+          if [ "$EVENT" = workflow_run ]; then
+            MESSAGES=$(git log -z --format=%B "$REBUILT_FROM..HEAD" | jq -Rs 'split("\u0000") | map(select(startswith("build: rebuild WASM bundle against ")))')
+            if [ "$(jq length <<< "$MESSAGES")" = 0 ]; then
+              echo "releasable=false" >> "$GITHUB_OUTPUT"
+              echo "The rebuild committed no new bundle; release-please not run."
+              exit 0
+            fi
+          elif [ "$EVENT" = workflow_dispatch ]; then
+            last="v$(jq -er '."."' .release-please-manifest.json)"
+            if ! git rev-parse -q --verify "refs/tags/$last" > /dev/null; then
+              echo "releasable=true" >> "$GITHUB_OUTPUT"
+              echo "No tag $last; release-please not gated."
+              exit 0
+            fi
+            MESSAGES=$(git log -z --format=%B "$last..HEAD" | jq -Rs 'split("\u0000") | map(select(. != ""))')
+            echo "Judging the $(jq length <<< "$MESSAGES") commits since $last."
+          fi
+          if jq -e --arg re "$RELEASABLE" '(length >= 2048) or ([.[] | (split("\n") | .[0], (select(.[0] | startswith("Merge pull request ")) | .[2] // empty) | test($re)) or test("\nBREAKING[- ]CHANGE: ") or test("\nRelease-As: ")] | any)' <<< "$MESSAGES" > /dev/null; then
+            echo "releasable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "releasable=false" >> "$GITHUB_OUTPUT"
+            echo "No releasable commit; release-please not run."
+          fi
+
+  # The release, created with the workflow token, is a job of its own: a
+  # release-please run marks the merged release PR tagged and reports
+  # release_created only that once, so a failure refreshing the next release
+  # PR must not be able to skip attach-bundle.
+  release:
+    needs: gate
+    if: needs.gate.outputs.releasable == 'true'
+    # One at a time: a push and a rebuild could both find the merged release
+    # PR untagged and both try to create its release.
+    concurrency:
+      group: release-please
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
+        id: rp
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          skip-github-pull-request: true
+
+  # After the release, so a just-merged release PR is tagged before the next
+  # one is worked out from the history.
+  release-pr:
+    needs: release
+    concurrency:
+      group: release-please-pr
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      APP_CONFIGURED: ${{ secrets.RELEASE_APP_PRIVATE_KEY != '' }}
+    steps:
+
+      # A release PR opened with the workflow token starts no workflow, so its
+      # checks never run. The signalk-espos-bot App's token does start them,
+      # as in espos-p4-cockpit. continue-on-error: a key whose App is not
+      # installed on this repository answers 404, and the PR must still go
+      # out with the workflow token.
+      - name: Get the App token for the release PR
+        id: app-token
+        if: env.APP_CONFIGURED == 'true'
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          # The Client ID is public (the App's settings page shows it), so it
+          # lives here; only the private key is a secret.
+          client-id: Iv23liXbDO1OUUwlQoNc
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Warn when the release PR goes out without the App
+        if: env.APP_CONFIGURED == 'true' && steps.app-token.outputs.token == ''
+        run: echo "::warning::RELEASE_APP_PRIVATE_KEY is set but no App token came back (is signalk-espos-bot installed on this repository?). The release PR is opened with the workflow token, so its checks will not start."
+
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          skip-github-release: true
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+  # A release created with the workflow token starts no `release:` workflow,
+  # so the bundle is attached here rather than by a workflow of its own.
+  attach-bundle:
+    needs: release
+    if: needs.release.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.release.outputs.tag_name }}
+          persist-credentials: false
+
+      - name: Attach the bundle to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release.outputs.tag_name }}
+        run: |
+          test -s public/jlp_wasm.js
+          test -s public/jlp_wasm.wasm
+          gh release upload "$TAG" public/jlp_wasm.js public/jlp_wasm.wasm --clobber --repo "$GITHUB_REPOSITORY"

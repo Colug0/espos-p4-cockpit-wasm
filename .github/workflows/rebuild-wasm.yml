@@ -114,6 +114,8 @@ jobs:
   # the designer's copy-wasm.sh can pull them without an emscripten
   # toolchain." Commits to whatever branch the workflow was dispatched on --
   # the operator picks the target by picking which branch to run against.
+  # A run on main that commits a new bundle then refreshes the release PR
+  # (release-please.yml listens for this workflow finishing).
   #
   # A separate job so the write token never coexists with the firmware build:
   # this one checks out only this repo and runs no caller-supplied code.
