@@ -45,6 +45,12 @@
 static lv_display_t* disp = nullptr;
 static lv_obj_t*     current_root = nullptr;
 
+// Height of the panel's status strip (firmware status_overlay.cpp,
+// kStripHeight). The panel puts every page below it, so a widget's y is
+// measured from the strip's lower edge; the designer draws the strip
+// itself over this canvas.
+static constexpr int kStatusStripHeight = 28;
+
 static EM_BOOL frame(double t, void*) {
   (void)t;
   lv_tick_inc(16);
@@ -100,8 +106,11 @@ const char* jlp_apply_layout(const char* json) {
 
   lv_obj_t* screen = lv_screen_active();
   lv_obj_t* staging = lv_obj_create(screen);
-  lv_obj_set_size(staging, lv_pct(100), lv_pct(100));
-  lv_obj_set_pos(staging, 0, 0);
+  // status_overlay defaults to true on the panel (layout_manager.cpp).
+  const bool strip = doc["status_overlay"] | true;
+  const int top = strip ? kStatusStripHeight : 0;
+  lv_obj_set_size(staging, lv_pct(100), lv_display_get_vertical_resolution(disp) - top);
+  lv_obj_set_pos(staging, 0, top);
   lv_obj_set_style_bg_opa(staging, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_set_style_border_width(staging, 0, LV_PART_MAIN);
   lv_obj_set_style_radius(staging, 0, LV_PART_MAIN);
