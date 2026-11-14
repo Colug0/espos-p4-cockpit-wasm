@@ -59,8 +59,9 @@ fetches the LVGL + ArduinoJson checkouts this CMakeLists points at into
   Conventional Commits, subject lower case, at most 50 characters.
   PRs are merged with a merge commit, so release-please works out the
   version from the branch commits: keep those conventional too, and
-  mark a breaking change with a `BREAKING CHANGE:` footer in one of
-  them (a `!` in the PR title alone does not reach the version).
+  mark a breaking change twice: `!` in the PR title (the release-notes
+  category) and a `BREAKING CHANGE:` footer in one branch commit (the
+  major bump; the title's `!` alone does not reach the version).
   Never bump `version.txt` or push a tag by hand.
 - **No AI attribution** anywhere.
 - The generated `public/jlp_wasm.{js,wasm}` are committed so the

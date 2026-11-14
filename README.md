@@ -146,8 +146,10 @@ attaches that commit's `public/jlp_wasm.js` and `public/jlp_wasm.wasm`
 to it. Pull request titles are the release notes, so they follow
 Conventional Commits (`pr-title.yml` checks them). Pull requests are
 merged with a merge commit, and release-please does not read a `!` in a
-merge commit's title, so mark a breaking change with a
-`BREAKING CHANGE:` footer in one of the branch commits.
+merge commit's title, so mark a breaking change twice: a `!` in the PR
+title, which files it under Breaking in the release notes, and a
+`BREAKING CHANGE:` footer in one of the branch commits, which makes
+the major bump.
 
 ## License
 
